@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Literal
+from typing import Dict, List, Literal
 
 
 @dataclass
 class IndicatorConfig:
     """Moving average (primary) indicator settings."""
-    fast_period: int = 50
-    slow_period: int = 200
+    fast_period: int = 20
+    slow_period: int = 50
     ma_type: Literal["sma", "ema"] = "ema"
 
 
@@ -37,15 +37,19 @@ class MACDConfig:
     fast: int = 12
     slow: int = 26
     signal: int = 9
+    use_macd_entry: bool = False  # Option 2: replace MA crossover with EMA-gate + MACD zero-cross
+    trend_gate_period: int = 200  # EMA period used as trend gate when use_macd_entry=True
 
 
 @dataclass
 class ATRStopConfig:
     """ATR-based dynamic stop loss."""
-    enabled: bool = True
+    enabled: bool = False
     period: int = 14
-    multiplier: float = 2.0
+    multiplier: float = 3.5
     trail: bool = True  # Ratchet stop up each day as price rises (never moves down)
+    profit_stop_enabled: bool = True  # Trailing profit stop — exit if price falls N×ATR from peak since entry
+    profit_stop_atr_mult: float = 3.0  # ATR multiplier for profit stop (wider than stop-loss)
     use_db_stop_when_available: bool = False  # Prefer suggested_stop_loss_pct from risk DB; fall back to local ATR
 
 
@@ -68,7 +72,7 @@ class RangeFilterConfig:
 @dataclass
 class VolatilityRegimeConfig:
     """Volatility regime — scale down position size in high-vol periods."""
-    enabled: bool = False
+    enabled: bool = True
     period: int = 30
     low_vol_threshold: float = 0.15
     high_vol_threshold: float = 0.30
@@ -84,15 +88,53 @@ class MultiTimeframeConfig:
 
 
 @dataclass
+class ShortConfig:
+    """Short-side trend following — trade bearish trends."""
+    enabled: bool = False
+    rsi_oversold_required: bool = True  # Confirm SHORT when RSI oversold
+    adx_filter: bool = True  # Block SHORT when ADX too weak
+
+
+@dataclass
+class PortfolioConstraintsConfig:
+    """Cross-ticker portfolio risk and concentration limits.
+
+    Applied only when using run_portfolio_backtest(). The single-ticker
+    run_backtest() uses max_position_pct from PositionSizingConfig instead.
+    """
+    max_open_positions: int = 10           # max simultaneous positions (long+short); 0 = unlimited
+    max_sector_exposure_pct: float = 40.0  # max % of NAV in any one sector; 0 = unlimited
+    max_gross_exposure_pct: float = 100.0  # max (long+short notional) / NAV; 0 = unlimited
+    adv_participation_pct: float = 2.5     # cap order at this % of daily volume; 0 = unlimited
+
+
+# Sector classification used by portfolio constraint checks
+SECTOR_MAP: Dict[str, str] = {
+    "AAPL": "Technology",  "MSFT": "Technology",  "GOOGL": "Technology",
+    "META": "Technology",  "NVDA": "Technology",  "QQQ":  "Technology",
+    "XLK":  "Technology",
+    "AMZN": "Consumer Discretionary",  "TSLA": "Consumer Discretionary",
+    "JPM":  "Financials",  "XLF": "Financials",
+    "XOM":  "Energy",      "XLE": "Energy",
+    "LLY":  "Healthcare",  "UNH": "Healthcare",  "XLV": "Healthcare",
+    "WMT":  "Consumer Staples",         "XLP": "Consumer Staples",
+    "CAT":  "Industrials",
+    "XLU":  "Utilities",
+    "SPY":  "Diversified",  "IWM": "Diversified",
+    "GLD":  "Commodities",
+}
+
+
+@dataclass
 class SignalConfig:
     """Signal generation settings."""
     # Sentiment filter thresholds
-    sentiment_filter_enabled: bool = False
+    sentiment_filter_enabled: bool = True
     min_sentiment_confidence: float = 0.4
     block_on_negative_sentiment: bool = True
 
     # Risk filter thresholds
-    risk_filter_enabled: bool = False
+    risk_filter_enabled: bool = True
     max_risk_score: float = 75.0  # Skip BUY if composite_risk_score > this
 
 
@@ -108,7 +150,7 @@ class PositionSizingConfig:
     sentiment_disagree_mult: float = 0.5 # Trend + sentiment disagree (reduce, not skip)
     
     # Use Kelly fraction from risk calculator if available
-    use_kelly_fraction: bool = False
+    use_kelly_fraction: bool = True
     kelly_cap: float = 0.25  # Max Kelly fraction to use
 
     # Scale position by vol_ann_30d/vol_ann_1y ratio from risk DB (disabled until DB has sufficient history)
@@ -128,12 +170,27 @@ class BacktestConfig:
     # Benchmark tickers
     benchmark_ticker: str = "SPY"
     compare_buy_and_hold: bool = True  # Also compare vs B&H of each ticker
+    abs_return_hurdle: float = 0.03  # Cash + hurdle benchmark: rf + this rate
 
 
 @dataclass
 class TrendFollowingConfig:
     """Master configuration combining all sub-configs."""
     indicator: IndicatorConfig = field(default_factory=IndicatorConfig)
+
+    # Per-ticker MA overrides — cyclicals use slower EMA 50/200 to avoid whipsaws;
+    # tech names (default) use EMA 20/50 for faster entry.
+    ticker_indicator_overrides: Dict[str, IndicatorConfig] = field(
+        default_factory=lambda: {
+            "XOM": IndicatorConfig(fast_period=50, slow_period=200),
+            "CAT": IndicatorConfig(fast_period=50, slow_period=200),
+            "GLD": IndicatorConfig(fast_period=50, slow_period=200),
+            "WMT": IndicatorConfig(fast_period=50, slow_period=200),
+            "LLY": IndicatorConfig(fast_period=50, slow_period=200),
+            "UNH": IndicatorConfig(fast_period=50, slow_period=200),
+        }
+    )
+
     signal: SignalConfig = field(default_factory=SignalConfig)
     position_sizing: PositionSizingConfig = field(default_factory=PositionSizingConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
@@ -147,6 +204,9 @@ class TrendFollowingConfig:
     range_filter: RangeFilterConfig = field(default_factory=RangeFilterConfig)
     vol_regime: VolatilityRegimeConfig = field(default_factory=VolatilityRegimeConfig)
     mtf: MultiTimeframeConfig = field(default_factory=MultiTimeframeConfig)
+    short: ShortConfig = field(default_factory=ShortConfig)
+    portfolio_constraints: PortfolioConstraintsConfig = field(default_factory=PortfolioConstraintsConfig)
+    sector_map: Dict[str, str] = field(default_factory=lambda: dict(SECTOR_MAP))
 
     # Tickers to trade (mirrors sentiment/risk pipelines)
     tickers: List[str] = field(default_factory=lambda: [
@@ -154,8 +214,6 @@ class TrendFollowingConfig:
         "AAPL", "MSFT", "GOOGL", "META", "NVDA",
         # Consumer Discretionary
         "AMZN", "TSLA",
-        # Financials
-        "JPM",
         # Energy
         "XOM",
         # Healthcare
@@ -164,9 +222,17 @@ class TrendFollowingConfig:
         "WMT",
         # Industrials
         "CAT",
+        # Diversifying ETFs
+        "GLD",   # Gold — trends strongly; genuine portfolio hedge
+        # Removed: JPM (Sharpe 0.07), SPY (Sharpe 0.13), QQQ (Sharpe 0.01),
+        #          IWM (Sharpe 0.02) — broad ETFs don’t trend cleanly
     ])
 
     lookback_days: int = 7300  # 20 calendar years → ~5040 trading days
+
+    def get_indicator_cfg(self, ticker: str) -> IndicatorConfig:
+        """Return per-ticker IndicatorConfig, falling back to the default."""
+        return self.ticker_indicator_overrides.get(ticker.upper(), self.indicator)
 
 
 # Default configuration instance

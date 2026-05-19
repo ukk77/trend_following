@@ -53,11 +53,23 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_paper_trades_ticker
                 ON paper_trades(ticker, executed_at);
+
+            CREATE TABLE IF NOT EXISTS daily_runs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_date    TEXT    NOT NULL UNIQUE,
+                run_at      TEXT    NOT NULL,
+                tickers_processed INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
         conn.commit()
         try:
             conn.execute("ALTER TABLE paper_positions ADD COLUMN atr_stop REAL")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+        try:
+            conn.execute("ALTER TABLE paper_positions ADD COLUMN peak_price REAL")
             conn.commit()
         except Exception:
             pass  # column already exists
@@ -128,6 +140,18 @@ def update_atr_stop(ticker: str, new_stop: float) -> None:
         conn.execute(
             "UPDATE paper_positions SET atr_stop=?, updated_at=? WHERE UPPER(ticker)=UPPER(?)",
             (new_stop, now, ticker.upper()),
+        )
+        conn.commit()
+
+
+def update_peak_price(ticker: str, peak: float) -> None:
+    """Update the stored peak price for an open position."""
+    init_db()
+    now = datetime.utcnow().isoformat() + "Z"
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE paper_positions SET peak_price=?, updated_at=? WHERE UPPER(ticker)=UPPER(?)",
+            (peak, now, ticker.upper()),
         )
         conn.commit()
 
@@ -228,3 +252,33 @@ def get_portfolio_snapshot(current_prices: Dict[str, float]) -> Dict[str, Any]:
             2,
         ),
     }
+
+
+def has_run_today() -> bool:
+    """Return True if paper trading has already been recorded for today's date."""
+    today = datetime.utcnow().date().isoformat()
+    with _get_conn() as conn:
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM daily_runs WHERE run_date = ?", (today,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+    return row is not None
+
+
+def record_daily_run(tickers_processed: int) -> None:
+    """Insert or replace today's run record in daily_runs."""
+    today = datetime.utcnow().date().isoformat()
+    now = datetime.utcnow().isoformat() + "Z"
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO daily_runs (run_date, run_at, tickers_processed)
+            VALUES (?, ?, ?)
+            ON CONFLICT(run_date) DO UPDATE SET run_at=excluded.run_at,
+                tickers_processed=excluded.tickers_processed
+            """,
+            (today, now, tickers_processed),
+        )
+        conn.commit()

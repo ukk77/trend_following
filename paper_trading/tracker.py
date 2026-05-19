@@ -48,11 +48,13 @@ def _fetch_ohlc(ticker: str, lookback_days: int):
 
 def run_paper_trading(
     cfg: Optional[TrendFollowingConfig] = None,
+    force: bool = False,
 ) -> List[Dict]:
     """Process today's signals and update paper positions for all tickers.
 
     Args:
-        cfg: Strategy configuration (uses defaults if None).
+        cfg:   Strategy configuration (uses defaults if None).
+        force: If True, skip the already-ran-today guard and run regardless.
 
     Returns:
         List of action dicts: one per ticker, with signal, action taken, and P&L.
@@ -61,6 +63,12 @@ def run_paper_trading(
         cfg = TrendFollowingConfig()
 
     paper_db.init_db()
+
+    if not force and paper_db.has_run_today():
+        log.warning(
+            "Paper trading already ran today — skipping. Pass force=True to override."
+        )
+        return []
     actions = []
 
     # ── Compute current portfolio value (cash + cost basis of open positions) ─
@@ -144,6 +152,41 @@ def run_paper_trading(
                     }
                 )
                 continue
+
+            # Trailing profit stop — exit if price falls N×ATR from peak since entry
+            if cfg.atr_stop.profit_stop_enabled:
+                atr_ind = ATR(period=cfg.atr_stop.period)
+                atr_val = atr_ind.latest_atr(ohlc)
+                if atr_val > 0:
+                    # Peak = max of stored peak (or entry price) and current price
+                    stored_peak = pos.get("peak_price", avg_cost)
+                    peak = max(stored_peak, current_price)
+                    profit_stop = peak - cfg.atr_stop.profit_stop_atr_mult * atr_val
+                    if current_price <= profit_stop:
+                        gross_pnl = (current_price - avg_cost) * held
+                        commission = current_price * held * cfg.backtest.commission_pct
+                        net_pnl = gross_pnl - commission
+                        paper_db.log_trade(
+                            ticker=ticker, action="SELL", shares=held, price=current_price,
+                            commission=commission, pnl=net_pnl, reason="PROFIT_STOP_HIT",
+                            signal_strength=0.0,
+                        )
+                        paper_db.upsert_position(ticker, 0, 0.0)
+                        action_taken = "PROFIT_SELL"
+                        shares_traded = held
+                        pnl = net_pnl
+                        log.info(
+                            "  PROFIT STOP HIT: sold %d @ $%.2f (peak=%.2f, stop=%.2f) | P&L: $%.2f",
+                            held, current_price, peak, profit_stop, net_pnl,
+                        )
+                        actions.append(
+                            {"ticker": ticker, "signal": "STOP", "action_taken": action_taken,
+                             "shares": shares_traded, "price": current_price, "pnl": pnl,
+                             "reason": "PROFIT_STOP_HIT", "sentiment": None, "risk_score": None})
+                        continue
+                    # Update stored peak
+                    if peak > stored_peak:
+                        paper_db.update_peak_price(ticker, peak)
 
             # Trail: ratchet stop up as price rises — never moves down
             if cfg.atr_stop.trail:
@@ -239,4 +282,5 @@ def run_paper_trading(
             }
         )
 
+    paper_db.record_daily_run(tickers_processed=len(cfg.tickers))
     return actions

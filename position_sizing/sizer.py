@@ -61,8 +61,21 @@ def compute_position_dollars(
             kelly_usd = portfolio_value * kelly_capped
             size = min(size, kelly_usd)
 
+    elif signal.action == "SHORT":
+        sentiment = signal.sentiment
+        conf = signal.sentiment_confidence or 0.0
+
+        if sentiment == "negative" and conf >= cfg.signal.min_sentiment_confidence:
+            multiplier = ps.sentiment_agree_mult
+        elif sentiment == "positive":
+            multiplier = ps.sentiment_disagree_mult
+        else:
+            multiplier = ps.sentiment_neutral_mult
+
+        size = base_usd * multiplier
+
     else:
-        # SELL — use full base size (closing logic; actual shares come from held position)
+        # SELL / COVER — use full base size
         size = base_usd
 
     return float(min(size, max_usd))
@@ -74,6 +87,7 @@ def shares_to_buy(
     current_price: float,
     cfg: TrendFollowingConfig,
     kelly_fraction: Optional[float] = None,
+    daily_volume: Optional[float] = None,
 ) -> int:
     """Return the number of whole shares to buy/sell.
 
@@ -83,6 +97,7 @@ def shares_to_buy(
         current_price: Current price per share.
         cfg: Strategy configuration.
         kelly_fraction: Optional Kelly fraction from risk calculator.
+        daily_volume: Today's traded share volume (for ADV participation cap).
 
     Returns:
         Number of whole shares (>= 0).
@@ -90,4 +105,10 @@ def shares_to_buy(
     if current_price <= 0:
         return 0
     dollar_size = compute_position_dollars(signal, portfolio_value, cfg, kelly_fraction)
-    return max(0, int(dollar_size / current_price))
+    shares = max(0, int(dollar_size / current_price))
+    # ADV participation cap — avoid moving the market on large orders
+    adv_pct = cfg.portfolio_constraints.adv_participation_pct
+    if adv_pct > 0 and daily_volume is not None and daily_volume > 0:
+        max_adv_shares = int(daily_volume * adv_pct / 100.0)
+        shares = min(shares, max_adv_shares)
+    return shares

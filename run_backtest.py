@@ -65,7 +65,7 @@ def main() -> int:
 
     from app.services.market_data import fetch_ohlcv, fetch_risk_free_rate_annual
     from trend_following.config import TrendFollowingConfig
-    from trend_following.backtest.engine import run_backtest
+    from trend_following.backtest.engine import run_backtest, run_portfolio_backtest
 
     cfg = TrendFollowingConfig()
     cfg.indicator.fast_period = args.fast
@@ -138,19 +138,20 @@ def main() -> int:
         return f"{v:.{decimals}f}"
 
     bench = cfg.backtest.benchmark_ticker.lower()
+    spy_key = f"alpha_vs_{cfg.backtest.benchmark_ticker.lower()}_pct"
     header = (
         f"{'TICKER':<10} {'RETURN%':>8} {'CAGR%':>7} {'SHARPE':>7} {'CALMAR':>7} "
-        f"{'MAX_DD%':>8} {'PF':>6} {'AVG_HOLD':>9} {'TRADES':>7} {'WIN%':>6}"
+        f"{'MAX_DD%':>8} {'PF':>6} {'AVG_HOLD':>9} {'TRADES':>7} {'WIN%':>6} {'ALPHA_SPY%':>11}"
     )
     log.info("\n" + "=" * 80)
     log.info("BACKTEST RESULTS")
     log.info("=" * 80)
     log.info(header)
-    log.info("-" * 85)
+    log.info("-" * 95)
 
     def _print_row(label: str, m: dict) -> None:
         log.info(
-            "%-10s %8.1f %7.1f %7s %7s %8.1f %6s %9s %7d %6.1f",
+            "%-10s %8.1f %7.1f %7s %7s %8.1f %6s %9s %7d %6.1f %11s",
             label,
             m["total_return_pct"],
             m["cagr_pct"],
@@ -161,6 +162,7 @@ def main() -> int:
             f"{m.get('avg_holding_days') or 0:.0f}d",
             m["total_trades"],
             m["win_rate_pct"],
+            _fmt(m.get(spy_key)),
         )
 
     for ticker, result in summary.results.items():
@@ -195,6 +197,85 @@ def main() -> int:
         out_path = results_dir / f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         out_path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
         log.info("\nResults saved → %s", out_path)
+
+    # ── Portfolio backtest (shared capital + constraints) ─────────────────────
+    log.info("\nRunning portfolio backtest (shared capital, sector/exposure constraints)...")
+    port_summary = run_portfolio_backtest(
+        cfg=cfg,
+        ticker_ohlc=ticker_ohlc,
+        benchmark_ohlc=benchmark_ohlc,
+        rf_annual=rf,
+        start_date=args.start,
+        end_date=args.end,
+    )
+
+    log.info("\n" + "=" * 80)
+    log.info("PORTFOLIO BACKTEST (shared capital + constraints)")
+    log.info(
+        "  max_open_positions=%d | max_sector_pct=%.0f%% | max_gross_pct=%.0f%% | adv_pct=%.1f%%",
+        cfg.portfolio_constraints.max_open_positions,
+        cfg.portfolio_constraints.max_sector_exposure_pct,
+        cfg.portfolio_constraints.max_gross_exposure_pct,
+        cfg.portfolio_constraints.adv_participation_pct,
+    )
+    log.info("=" * 80)
+    log.info(header)
+    log.info("-" * 85)
+
+    for ticker, result in port_summary.results.items():
+        t_trades = result.trades_df
+        t_metrics = {
+            "total_return_pct": result.metrics.get("total_return_pct", 0.0),
+            "cagr_pct": result.metrics.get("cagr_pct", 0.0),
+            "sharpe": result.metrics.get("sharpe"),
+            "calmar": result.metrics.get("calmar"),
+            "max_drawdown_pct": result.metrics.get("max_drawdown_pct", 0.0),
+            "profit_factor": result.metrics.get("profit_factor"),
+            "avg_holding_days": result.metrics.get("avg_holding_days"),
+            "total_trades": len(t_trades[t_trades["action"] == "BUY"]) if not t_trades.empty else 0,
+            "win_rate_pct": result.metrics.get("win_rate_pct", 0.0),
+        }
+        _print_row(ticker, t_metrics)
+
+    if port_summary.portfolio_metrics:
+        log.info("-" * 85)
+        _print_row("PORTFOLIO", port_summary.portfolio_metrics)
+
+    # ── Delta comparison ───────────────────────────────────────────────────────
+    if summary.portfolio_metrics and port_summary.portfolio_metrics:
+        old_m = summary.portfolio_metrics
+        new_m = port_summary.portfolio_metrics
+        log.info("\n" + "-" * 60)
+        log.info("DELTA (portfolio-constrained vs isolated-ticker blend)")
+        log.info("-" * 60)
+
+        def _delta(key, pct=False):
+            old_v = old_m.get(key)
+            new_v = new_m.get(key)
+            if old_v is None or new_v is None:
+                return "N/A"
+            diff = new_v - old_v
+            sign = "+" if diff >= 0 else ""
+            return f"{sign}{diff:.2f}{'pp' if pct else ''}"
+
+        log.info("  Return %%    : %s -> %s  (Δ %s)",
+                 _fmt(old_m.get("total_return_pct")), _fmt(new_m.get("total_return_pct")),
+                 _delta("total_return_pct", pct=True))
+        log.info("  CAGR %%      : %s -> %s  (Δ %s)",
+                 _fmt(old_m.get("cagr_pct")), _fmt(new_m.get("cagr_pct")),
+                 _delta("cagr_pct", pct=True))
+        log.info("  Sharpe      : %s -> %s  (Δ %s)",
+                 _fmt(old_m.get("sharpe")), _fmt(new_m.get("sharpe")),
+                 _delta("sharpe"))
+        log.info("  MaxDD %%     : %s -> %s  (Δ %s)",
+                 _fmt(old_m.get("max_drawdown_pct")), _fmt(new_m.get("max_drawdown_pct")),
+                 _delta("max_drawdown_pct", pct=True))
+        log.info("  Trades      : %d -> %d  (Δ %+d)",
+                 old_m.get("total_trades", 0), new_m.get("total_trades", 0),
+                 new_m.get("total_trades", 0) - old_m.get("total_trades", 0))
+        log.info("  Win %%       : %s -> %s  (Δ %s)",
+                 _fmt(old_m.get("win_rate_pct")), _fmt(new_m.get("win_rate_pct")),
+                 _delta("win_rate_pct", pct=True))
 
     log.info("=" * 60)
     log.info("Trend Following Backtest END")
