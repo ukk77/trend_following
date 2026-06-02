@@ -47,6 +47,30 @@ class EMA(Indicator):
         return IndicatorResult(values=series, name=self.name)
 
 
+class MVWAP(Indicator):
+    """Moving Volume-Weighted Average Price (Rolling VWAP)."""
+
+    def __init__(self, window: int, price_col: str = "Close", volume_col: str = "Volume") -> None:
+        self._window = window
+        self._price_col = price_col
+        self._volume_col = volume_col
+
+    @property
+    def name(self) -> str:
+        return f"MVWAP({self._window})"
+
+    def compute(self, ohlc: pd.DataFrame) -> IndicatorResult:
+        price = ohlc[self._price_col]
+        vol = ohlc[self._volume_col]
+        
+        pv = price * vol
+        sum_pv = pv.rolling(self._window, min_periods=self._window).sum()
+        sum_v = vol.rolling(self._window, min_periods=self._window).sum()
+        
+        series = sum_pv / sum_v.replace(0.0, np.nan)
+        return IndicatorResult(values=series, name=self.name)
+
+
 class CrossoverSignal(Indicator):
     """Trend signal from fast/slow MA crossover.
 
@@ -63,7 +87,7 @@ class CrossoverSignal(Indicator):
         self,
         fast_window: int = 20,
         slow_window: int = 50,
-        ma_type: Literal["SMA", "EMA", "sma", "ema"] = "EMA",
+        ma_type: Literal["SMA", "EMA", "MVWAP", "sma", "ema", "mvwap"] = "EMA",
         price_col: str = "Close",
     ) -> None:
         if fast_window >= slow_window:
@@ -75,7 +99,13 @@ class CrossoverSignal(Indicator):
         self._ma_type = ma_type.upper()
         self._price_col = price_col
 
-        MA = EMA if self._ma_type == "EMA" else SMA
+        if self._ma_type == "EMA":
+            MA = EMA
+        elif self._ma_type == "MVWAP":
+            MA = MVWAP
+        else:
+            MA = SMA
+            
         self._fast_ma = MA(fast_window, price_col)
         self._slow_ma = MA(slow_window, price_col)
 

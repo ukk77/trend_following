@@ -139,3 +139,49 @@ class MACD(Indicator):
         """Return True if MACD histogram is negative (bearish)."""
         hist = self.compute(ohlc).values.dropna()
         return bool(not hist.empty and float(hist.iloc[-1]) < 0)
+
+    def check_bearish_divergence(self, ohlc: pd.DataFrame, lookback: int = 20) -> bool:
+        """
+        Detect Bearish MACD Divergence.
+        Price makes a Higher High, but MACD histogram makes a Lower High.
+        Used as an early trend exhaustion warning (Exit signal).
+        """
+        hist = self.compute(ohlc).values.dropna()
+        if len(hist) < lookback + 5:
+            return False
+            
+        prices = ohlc[self._price_col].loc[hist.index]
+        
+        # Look at last 'lookback' bars
+        recent_prices = prices.iloc[-lookback:]
+        recent_hist = hist.iloc[-lookback:]
+        
+        # If current price is near the high of the lookback period
+        if prices.iloc[-1] >= recent_prices.max() * 0.995:
+            # Find the absolute max of MACD histogram in the lookback period
+            max_hist = recent_hist.max()
+            
+            # If current MACD histogram is significantly lower than the max MACD peak
+            # and current histogram is sloping down (current < prev)
+            if hist.iloc[-1] < hist.iloc[-2] and hist.iloc[-1] < (max_hist * 0.75):
+                return True
+                
+        return False
+
+    def bearish_divergence_series(self, ohlc: pd.DataFrame, lookback: int = 20) -> pd.Series:
+        """Pre-compute a boolean Series: True on bars with bearish MACD divergence."""
+        hist = self.compute(ohlc).values
+        price = ohlc[self._price_col]
+        div = pd.Series(False, index=ohlc.index)
+        for i in range(lookback + 5, len(ohlc)):
+            h_slice = hist.iloc[i - lookback: i + 1].dropna()
+            if len(h_slice) < 3:
+                continue
+            h_cur, h_prev = hist.iloc[i], hist.iloc[i - 1]
+            if pd.isna(h_cur) or pd.isna(h_prev):
+                continue
+            p_slice = price.iloc[i - lookback: i + 1]
+            if float(price.iloc[i]) >= float(p_slice.max()) * 0.995:
+                if float(h_cur) < float(h_prev) and float(h_cur) < float(h_slice.max()) * 0.75:
+                    div.iloc[i] = True
+        return div

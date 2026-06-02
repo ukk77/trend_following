@@ -154,9 +154,9 @@ def cmd_backtest(args) -> None:
     bench = cfg.backtest.benchmark_ticker.lower()
     print(
         f"{'TICKER':<10} {'RETURN%':>8} {'CAGR%':>7} {'SHARPE':>7} "
-        f"{'MAX_DD%':>8} {f'ALPHA_{bench.upper()}%':>12} {'ALPHA_C+3%':>11} {'TRADES':>7} {'WIN%':>6}"
+        f"{'CALMAR':>7} {'MAX_DD%':>8} {'PF':>6} {'AVG_HOLD':>9} {'TRADES':>7} {'WIN%':>6} {'ALPHA_C+3%':>11}"
     )
-    print("-" * 87)
+    print("-" * 92)
 
     rows = list(summary.results.items())
     if summary.portfolio_metrics:
@@ -168,10 +168,13 @@ def cmd_backtest(args) -> None:
         alpha_c3 = m.get("alpha_vs_cash_plus_3_pct")
         sharpe_str = _fmt(m.get("sharpe"))
         alpha_str = _fmt(alpha)
+        hold_str = f"{m.get('avg_holding_days') or 0:.0f}d"
         print(
             f"{ticker:<10} {m['total_return_pct']:>8.1f} {m['cagr_pct']:>7.1f} "
-            f"{sharpe_str:>7} {m['max_drawdown_pct']:>8.1f} "
-            f"{alpha_str:>12} {_fmt(alpha_c3):>11} {m['total_trades']:>7} {m['win_rate_pct']:>6.1f}"
+            f"{_fmt(m.get('sharpe')):>7} {_fmt(m.get('calmar')):>7} "
+            f"{m['max_drawdown_pct']:>8.1f} {_fmt(m.get('profit_factor')):>6} "
+            f"{hold_str:>9} "
+            f"{m['total_trades']:>7} {m['win_rate_pct']:>6.1f} {_fmt(alpha_c3):>11}"
         )
 
 

@@ -14,7 +14,8 @@ Filter order (each layer can only demote BUY → HOLD, not promote):
 """
 from __future__ import annotations
 
-import sqlite3
+import os
+import requests
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,39 +62,31 @@ class Signal:
 
 
 def _fetch_latest_sentiment(ticker: str) -> Optional[dict]:
-    """Look up the most recent sentiment snapshot from the history DB."""
-    if not _SENTIMENT_DB.exists():
-        return None
+    """Look up the most recent sentiment snapshot from the API."""
+    url = os.getenv("SENTIMENT_API_URL", "http://localhost:8000")
     try:
-        with sqlite3.connect(str(_SENTIMENT_DB)) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT overall_sentiment, confidence, avg_sentiment "
-                "FROM sentiment_snapshots "
-                "WHERE UPPER(ticker)=UPPER(?) ORDER BY captured_at DESC LIMIT 1",
-                (ticker.upper(),),
-            ).fetchone()
-        return dict(row) if row else None
+        resp = requests.get(f"{url}/api/history/{ticker}?limit=1", timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("snapshots") and len(data["snapshots"]) > 0:
+                return data["snapshots"][0]
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _fetch_latest_risk(ticker: str) -> Optional[dict]:
-    """Look up the most recent risk snapshot from the history DB."""
-    if not _RISK_DB.exists():
-        return None
+    """Look up the most recent risk snapshot from the API."""
+    url = os.getenv("RISK_API_URL", "http://localhost:8100")
     try:
-        with sqlite3.connect(str(_RISK_DB)) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT composite_risk_score, risk_bucket, overall_sentiment, upstream_confidence "
-                "FROM risk_snapshots "
-                "WHERE UPPER(ticker)=UPPER(?) ORDER BY captured_at DESC LIMIT 1",
-                (ticker.upper(),),
-            ).fetchone()
-        return dict(row) if row else None
+        resp = requests.get(f"{url}/api/history/{ticker}?limit=1", timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("snapshots") and len(data["snapshots"]) > 0:
+                return data["snapshots"][0]
     except Exception:
-        return None
+        pass
+    return None
 
 
 def generate_signal(
@@ -161,10 +154,14 @@ def generate_signal(
         rsi_value = rsi_ind.latest_value(ohlc)
 
     macd_hist: Optional[float] = None
+    macd_bearish_div: bool = False
     if cfg.macd.enabled:
         macd_ind = MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal)
         hist_series = macd_ind.compute(ohlc).values.dropna()
         macd_hist = float(hist_series.iloc[-1]) if not hist_series.empty else None
+        if getattr(cfg.macd, 'divergence_filter', False) or getattr(cfg.macd, 'divergence_exit', False):
+            if hasattr(macd_ind, 'check_bearish_divergence'):
+                macd_bearish_div = macd_ind.check_bearish_divergence(ohlc)
 
     volume_ratio: Optional[float] = None
     if cfg.volume.enabled:
@@ -192,6 +189,7 @@ def generate_signal(
         adx_val=adx_value,
         rsi_val=rsi_value,
         macd_hist=macd_hist,
+        macd_bearish_div=macd_bearish_div,
         vol_ratio=volume_ratio,
         range_pos=range_position,
         weekly_trend=weekly_trend,

@@ -19,6 +19,7 @@ def apply_filters(
     adx_val: Optional[float] = None,
     rsi_val: Optional[float] = None,
     macd_hist: Optional[float] = None,
+    macd_bearish_div: bool = False,
     vol_ratio: Optional[float] = None,
     range_pos: Optional[float] = None,
     weekly_trend: Optional[float] = None,
@@ -54,8 +55,16 @@ def apply_filters(
         elif rsi_val is not None:
             reasons.append(f"rsi={rsi_val:.1f}OK(oversold)")
 
-    # ── MACD — confirm momentum direction (skipped when MACD is primary signal)
-    if cfg.macd.enabled and not cfg.macd.use_macd_entry and filtered == "BUY":
+    # ── MACD ─ confirm momentum direction (skipped when MACD is primary signal)
+    if getattr(cfg.macd, 'divergence_filter', False) and macd_bearish_div and filtered == "BUY":
+        filtered = "HOLD"
+        reasons.append("macd_div=bearish(exhaustion)")
+    elif getattr(cfg.macd, 'divergence_exit', False) and macd_bearish_div and filtered == "HOLD":
+        # Force a SELL if holding and bearish divergence appears
+        filtered = "SELL"
+        reasons.append("macd_div_exit")
+        
+    if cfg.macd.enabled and not getattr(cfg.macd, 'use_macd_entry', False) and filtered == "BUY":
         if macd_hist is not None and macd_hist <= 0:
             filtered = "HOLD"
             reasons.append(f"macd_hist={macd_hist:.4f}(bearish)")

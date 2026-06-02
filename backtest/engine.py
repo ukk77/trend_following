@@ -41,8 +41,8 @@ from ..indicators.range_filter import RangeFilter, MultiTimeframeConfirmation
 from ..position_sizing.sizer import shares_to_buy
 from ..signals.generator import Action, Signal
 from ..signals.filters import apply_filters
-from .metrics import compute_all_metrics
-from .portfolio import Portfolio
+from trading_core import compute_all_metrics
+from trading_core import Portfolio
 
 
 # ── History DB helpers ────────────────────────────────────────────────────────
@@ -207,6 +207,12 @@ def _run_single_ticker(
         MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal).compute(ohlc).values
         if cfg.macd.enabled else None
     )
+    macd_div_series = (
+        MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal)
+        .bearish_divergence_series(ohlc)
+        if (cfg.macd.enabled and (cfg.macd.divergence_filter or cfg.macd.divergence_exit))
+        else None
+    )
     vol_ratio_series = (
         VolumeConfirmation(period=cfg.volume.period, min_ratio=cfg.volume.min_ratio)
         .compute(ohlc).raw["ratio"]
@@ -336,6 +342,7 @@ def _run_single_ticker(
             adx_val=_val(adx_series, dt) if cfg.adx.enabled else None,
             rsi_val=_val(rsi_series, dt) if cfg.rsi.enabled else None,
             macd_hist=_val(macd_hist_series, dt) if cfg.macd.enabled else None,
+            macd_bearish_div=bool(_val(macd_div_series, dt, False)) if macd_div_series is not None else False,
             vol_ratio=_val(vol_ratio_series, dt) if cfg.volume.enabled else None,
             range_pos=_val(range_pos_series, dt) if cfg.range_filter.enabled else None,
             weekly_trend=_val(mtf_series, dt) if cfg.mtf.enabled else None,
@@ -585,6 +592,12 @@ def _precompute_indicators(
         MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal).compute(ohlc).values
         if cfg.macd.enabled else None
     )
+    macd_div = (
+        MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal)
+        .bearish_divergence_series(ohlc)
+        if (cfg.macd.enabled and (cfg.macd.divergence_filter or cfg.macd.divergence_exit))
+        else None
+    )
     vol_ratio = (
         VolumeConfirmation(period=cfg.volume.period, min_ratio=cfg.volume.min_ratio)
         .compute(ohlc).raw["ratio"]
@@ -623,6 +636,7 @@ def _precompute_indicators(
         "adx": adx,
         "rsi": rsi,
         "macd": macd,
+        "macd_div": macd_div,
         "vol_ratio": vol_ratio,
         "range_pos": range_pos,
         "mtf": mtf,
@@ -755,6 +769,7 @@ def run_portfolio_backtest(
                 adx_val=_val_at(ind["adx"], dt) if cfg.adx.enabled else None,
                 rsi_val=_val_at(ind["rsi"], dt) if cfg.rsi.enabled else None,
                 macd_hist=_val_at(ind["macd"], dt) if cfg.macd.enabled else None,
+                macd_bearish_div=bool(_val_at(ind["macd_div"], dt, False)) if ind.get("macd_div") is not None else False,
                 vol_ratio=_val_at(ind["vol_ratio"], dt) if cfg.volume.enabled else None,
                 range_pos=_val_at(ind["range_pos"], dt) if cfg.range_filter.enabled else None,
                 weekly_trend=_val_at(ind["mtf"], dt) if cfg.mtf.enabled else None,

@@ -10,7 +10,7 @@ class IndicatorConfig:
     """Moving average (primary) indicator settings."""
     fast_period: int = 20
     slow_period: int = 50
-    ma_type: Literal["sma", "ema"] = "ema"
+    ma_type: Literal["sma", "ema", "mvwap"] = "mvwap"
 
 
 @dataclass
@@ -39,6 +39,8 @@ class MACDConfig:
     signal: int = 9
     use_macd_entry: bool = False  # Option 2: replace MA crossover with EMA-gate + MACD zero-cross
     trend_gate_period: int = 200  # EMA period used as trend gate when use_macd_entry=True
+    divergence_filter: bool = True   # Block BUY entry on bearish MACD divergence
+    divergence_exit: bool = True     # Force SELL when bearish divergence detected on open position
 
 
 @dataclass
