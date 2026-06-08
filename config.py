@@ -115,6 +115,7 @@ SECTOR_MAP: Dict[str, str] = {
     "AAPL": "Technology",  "MSFT": "Technology",  "GOOGL": "Technology",
     "META": "Technology",  "NVDA": "Technology",  "QQQ":  "Technology",
     "XLK":  "Technology",
+    "MU": "Technology", "LITE": "Technology", "NVTS": "Technology", "ASML": "Technology",
     "AMZN": "Consumer Discretionary",  "TSLA": "Consumer Discretionary",
     "JPM":  "Financials",  "XLF": "Financials",
     "XOM":  "Energy",      "XLE": "Energy",
@@ -214,6 +215,7 @@ class TrendFollowingConfig:
     tickers: List[str] = field(default_factory=lambda: [
         # Tech / Communication
         "AAPL", "MSFT", "GOOGL", "META", "NVDA",
+        "MU", "LITE", "NVTS", "ASML",
         # Consumer Discretionary
         "AMZN", "TSLA",
         # Energy
