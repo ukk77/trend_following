@@ -112,19 +112,28 @@ class PortfolioConstraintsConfig:
 
 # Sector classification used by portfolio constraint checks
 SECTOR_MAP: Dict[str, str] = {
+    "KMI": "Energy",
+    "WMB": "Energy",
+    "GEV": "Industrials",
+    "VST": "Utilities",
     "AAPL": "Technology",  "MSFT": "Technology",  "GOOGL": "Technology",
     "META": "Technology",  "NVDA": "Technology",  "QQQ":  "Technology",
-    "XLK":  "Technology",
+    "XLK":  "Technology", "SMCI": "Technology",
     "MU": "Technology", "LITE": "Technology", "NVTS": "Technology", "ASML": "Technology",
     "AMZN": "Consumer Discretionary",  "TSLA": "Consumer Discretionary",
-    "JPM":  "Financials",  "XLF": "Financials",
+    "HD": "Consumer Discretionary", "MCD": "Consumer Discretionary", "BABA": "Consumer Discretionary",
+    "JPM":  "Financials",  "XLF": "Financials", "V": "Financials", "MA": "Financials", "BRK.B": "Financials", "MARA": "Financials",
     "XOM":  "Energy",      "XLE": "Energy",
     "LLY":  "Healthcare",  "UNH": "Healthcare",  "XLV": "Healthcare",
-    "WMT":  "Consumer Staples",         "XLP": "Consumer Staples",
-    "CAT":  "Industrials",
+    "ABBV": "Healthcare", "MRK": "Healthcare", "JNJ": "Healthcare",
+    "WMT":  "Consumer Staples",         "XLP": "Consumer Staples", "COST": "Consumer Staples",
+    "CAT":  "Industrials", "GE": "Industrials", "LMT": "Industrials", "RTX": "Industrials", "BA": "Industrials",
+    "FCX": "Materials", "NUE": "Materials", "XLB": "Materials",
     "XLU":  "Utilities",
-    "SPY":  "Diversified",  "IWM": "Diversified",
+    "XLRE": "Real Estate",
+    "SPY":  "Diversified",  "IWM": "Diversified", "SQQQ": "Inverse",
     "GLD":  "Commodities",
+    "TLT": "Fixed Income",
 }
 
 
@@ -217,19 +226,21 @@ class TrendFollowingConfig:
         "AAPL", "MSFT", "GOOGL", "META", "NVDA",
         "MU", "LITE", "NVTS", "ASML",
         # Consumer Discretionary
-        "AMZN", "TSLA",
+        "AMZN", "TSLA", "HD", "MCD",
+        # Financials
+        "V", "MA",
         # Energy
         "XOM",
         # Healthcare
-        "LLY", "UNH",
+        "LLY", "UNH", "ABBV", "MRK", "JNJ",
         # Consumer Staples
-        "WMT",
+        "WMT", "COST",
         # Industrials
         "CAT",
-        # Diversifying ETFs
+        # Diversifying ETFs / Fixed Income
         "GLD",   # Gold — trends strongly; genuine portfolio hedge
-        # Removed: JPM (Sharpe 0.07), SPY (Sharpe 0.13), QQQ (Sharpe 0.01),
-        #          IWM (Sharpe 0.02) — broad ETFs don’t trend cleanly
+        "TLT",   # Long-duration treasuries
+        "SQQQ",  # Inverse NASDAQ (Stress test)
     ])
 
     lookback_days: int = 7300  # 20 calendar years → ~5040 trading days
