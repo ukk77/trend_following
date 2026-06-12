@@ -116,6 +116,8 @@ SECTOR_MAP: Dict[str, str] = {
     "WMB": "Energy",
     "GEV": "Industrials",
     "VST": "Utilities",
+    "MP": "Materials",
+    "UUUU": "Materials",
     "AAPL": "Technology",  "MSFT": "Technology",  "GOOGL": "Technology",
     "META": "Technology",  "NVDA": "Technology",  "QQQ":  "Technology",
     "XLK":  "Technology", "SMCI": "Technology",
@@ -222,6 +224,7 @@ class TrendFollowingConfig:
 
     # Tickers to trade (mirrors sentiment/risk pipelines)
     tickers: List[str] = field(default_factory=lambda: [
+        'VST', 'GEV', 'WMB', 'KMI', 'MP', 'UUUU',
         # Tech / Communication
         "AAPL", "MSFT", "GOOGL", "META", "NVDA",
         "MU", "LITE", "NVTS", "ASML",
