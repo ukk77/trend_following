@@ -44,8 +44,10 @@ except ImportError:
     def early_session_size_scalar(**kw): return 1.0  # type: ignore
 
 _TRADING_ROOT = Path(__file__).resolve().parents[2]
-_SENTIMENT_DB = _TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db"
-_RISK_DB = _TRADING_ROOT / "risk_calculator" / "backend" / "risk_history.db"
+_SENTIMENT_DB = Path(os.getenv("SENTIMENT_DB_PATH",
+    str(_TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db")))
+_RISK_DB = Path(os.getenv("RISK_DB_PATH",
+    str(_TRADING_ROOT / "risk_calculator" / "backend" / "risk_history.db")))
 
 
 @dataclass

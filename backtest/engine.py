@@ -17,6 +17,7 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -27,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 _TRADING_ROOT = Path(__file__).resolve().parents[2]
-_RISK_BACKEND = _TRADING_ROOT / "risk_calculator" / "backend"
+_RISK_BACKEND = Path(os.getenv("RISK_CALCULATOR_BACKEND", str(_TRADING_ROOT / "risk_calculator" / "backend")))
 if str(_RISK_BACKEND) not in sys.path:
     sys.path.insert(0, str(_RISK_BACKEND))
 
@@ -49,7 +50,8 @@ from trading_core import Portfolio
 
 def _load_sentiment_history(ticker: str) -> pd.DataFrame:
     """Load all sentiment snapshots for a ticker as a date-indexed DataFrame."""
-    db_path = _TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db"
+    db_path = Path(os.getenv("SENTIMENT_DB_PATH",
+        str(_TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db")))
     if not db_path.exists():
         return pd.DataFrame()
     try:
@@ -71,7 +73,8 @@ def _load_sentiment_history(ticker: str) -> pd.DataFrame:
 
 def _load_risk_history(ticker: str) -> pd.DataFrame:
     """Load all risk snapshots for a ticker as a date-indexed DataFrame."""
-    db_path = _TRADING_ROOT / "risk_calculator" / "backend" / "risk_history.db"
+    db_path = Path(os.getenv("RISK_DB_PATH",
+        str(_TRADING_ROOT / "risk_calculator" / "backend" / "risk_history.db")))
     if not db_path.exists():
         return pd.DataFrame()
     try:
