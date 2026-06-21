@@ -32,6 +32,17 @@ from ..indicators.volume import VolumeConfirmation
 from ..indicators.range_filter import RangeFilter, MultiTimeframeConfirmation
 from .filters import apply_filters, Action
 
+try:
+    from app.services.session_context import (
+        fetch_premarket_gap,
+        premarket_confirmation_mult,
+        early_session_size_scalar,
+    )
+except ImportError:
+    def fetch_premarket_gap(ticker): return None  # type: ignore
+    def premarket_confirmation_mult(gap, direction, **kw): return 1.0  # type: ignore
+    def early_session_size_scalar(**kw): return 1.0  # type: ignore
+
 _TRADING_ROOT = Path(__file__).resolve().parents[2]
 _SENTIMENT_DB = _TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db"
 _RISK_DB = _TRADING_ROOT / "risk_calculator" / "backend" / "risk_history.db"
@@ -201,6 +212,8 @@ def generate_signal(
     # ── Extract sentiment/risk fields for strength calc ───────────────────
     overall_sentiment = (sentiment_data or {}).get("overall_sentiment")
     conf = float((sentiment_data or {}).get("confidence") or 0.0)
+    contrarian_signal = (sentiment_data or {}).get("contrarian_signal")
+    relative_sentiment = (sentiment_data or {}).get("relative_sentiment")
     risk_score = (risk_data or {}).get("composite_risk_score")
     risk_bucket = (risk_data or {}).get("risk_bucket")
 
@@ -217,7 +230,7 @@ def generate_signal(
         if vol_regime_mult < 1.0:
             reasons.append(f"vol_regime_mult={vol_regime_mult:.2f}")
 
-    # ── ATR stop price (informational) ───────────────────────────────────────
+    # ── ATR stop price (informational) ──────────────────────────────────────
     atr_stop: Optional[float] = None
     if cfg.atr_stop.enabled:
         atr_ind = ATR(period=cfg.atr_stop.period)
@@ -226,7 +239,16 @@ def generate_signal(
             ohlc, current_price, cfg.atr_stop.multiplier, direction="long"
         )
 
-    # ── Compute final position strength ──────────────────────────────────────
+    # ── Session context: pre-market gap confirmation + early-session scaling ──
+    pm_gap = fetch_premarket_gap(ticker)
+    pm_mult = premarket_confirmation_mult(pm_gap, filtered_action)
+    es_scalar = early_session_size_scalar()
+    if pm_gap is not None and abs(pm_gap) >= 0.005:
+        reasons.append(f"pm_gap={pm_gap:+.1%}(x{pm_mult:.2f})")
+    if es_scalar < 1.0:
+        reasons.append(f"early_session(x{es_scalar:.2f})")
+
+    # ── Compute final position strength ───────────────────────────────────────
     if filtered_action == "HOLD":
         strength = 0.0
     elif filtered_action == "BUY":
@@ -240,7 +262,29 @@ def generate_signal(
         else:
             sent_mult = ps.sentiment_neutral_mult
             reasons.append(f"sent=neutral(x{sent_mult})")
-        strength = min(abs(last_direction) * sent_mult * (vol_regime_mult or 1.0), 1.0)
+        
+        # Contrarian signal adjustments for trend following
+        contrarian_mult = 1.0
+        if contrarian_signal == "extreme_bearish_opportunity":
+            # Fear often marks the start of a new uptrend - enhance position
+            contrarian_mult = 1.2
+            reasons.append(f"contrarian=opp(x{contrarian_mult})")
+        elif contrarian_signal == "extreme_bullish_caution":
+            # Already filtered out, but if it somehow passed, reduce size
+            contrarian_mult = 0.8
+            reasons.append(f"contrarian=caution(x{contrarian_mult})")
+        
+        # Sector-relative sentiment adjustment
+        sector_mult = 1.0
+        if relative_sentiment is not None:
+            if relative_sentiment > 0.15:  # Outperforming sector = tailwind
+                sector_mult = 1.1
+                reasons.append(f"sector=outperform(x{sector_mult})")
+            elif relative_sentiment < -0.15:  # Underperforming sector = headwind
+                sector_mult = 0.9
+                reasons.append(f"sector=underperform(x{sector_mult})")
+        
+        strength = min(abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar, 1.0)
     elif filtered_action == "SHORT":
         ps = cfg.position_sizing
         if overall_sentiment == "negative" and conf >= cfg.signal.min_sentiment_confidence:
@@ -252,7 +296,25 @@ def generate_signal(
         else:
             sent_mult = ps.sentiment_neutral_mult
             reasons.append(f"sent=neutral(x{sent_mult})")
-        strength = min(abs(last_direction) * sent_mult * (vol_regime_mult or 1.0), 1.0)
+        
+        # Contrarian adjustments for short positions
+        contrarian_mult = 1.0
+        if contrarian_signal == "extreme_bullish_caution":
+            # Crowded long = good short opportunity
+            contrarian_mult = 1.2
+            reasons.append(f"contrarian=caution_short(x{contrarian_mult})")
+        
+        # Sector-relative adjustment for shorts
+        sector_mult = 1.0
+        if relative_sentiment is not None:
+            if relative_sentiment < -0.15:  # Underperforming sector = good short
+                sector_mult = 1.1
+                reasons.append(f"sector=underperform_short(x{sector_mult})")
+            elif relative_sentiment > 0.15:  # Outperforming = avoid short
+                sector_mult = 0.9
+                reasons.append(f"sector=outperform_avoid(x{sector_mult})")
+        
+        strength = min(abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar, 1.0)
     else:  # SELL / COVER
         strength = abs(last_direction)
 

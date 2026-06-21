@@ -71,6 +71,27 @@ def run_paper_trading(
         return []
     actions = []
 
+    # ── Close orphaned positions for tickers no longer in this strategy's universe ──
+    _universe = {t.upper() for t in cfg.tickers}
+    for _pos in paper_db.get_positions():
+        if _pos["ticker"].upper() not in _universe:
+            log.warning(
+                "Orphaned position: %s (%d shares) is no longer in TF universe — closing.",
+                _pos["ticker"], _pos["shares"],
+            )
+            paper_db.log_trade(
+                ticker=_pos["ticker"], action="SELL", shares=_pos["shares"],
+                price=_pos["avg_cost"], commission=0.0, pnl=0.0,
+                reason="UNIVERSE_CHANGE",
+            )
+            paper_db.upsert_position(_pos["ticker"], 0, 0.0)
+            actions.append({
+                "ticker": _pos["ticker"], "signal": "SELL",
+                "action_taken": "SELL", "shares": _pos["shares"],
+                "price": _pos["avg_cost"], "pnl": 0.0,
+                "reason": "UNIVERSE_CHANGE", "sentiment": None, "risk_score": None,
+            })
+
     # ── Compute current portfolio value (cash + cost basis of open positions) ─
     _positions_snapshot = paper_db.get_positions()
     _cash = paper_db.get_cash_balance(cfg.backtest.initial_capital)

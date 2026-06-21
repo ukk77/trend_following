@@ -104,6 +104,7 @@ def apply_filters(
     # ── Sentiment filter (DB) ────────────────────────────────────────────
     overall_sentiment = (sentiment_data or {}).get("overall_sentiment")
     conf = float((sentiment_data or {}).get("confidence") or 0.0)
+    contrarian_signal = (sentiment_data or {}).get("contrarian_signal")
 
     if filtered == "BUY" and cfg.signal.sentiment_filter_enabled and sentiment_data is not None:
         if conf < cfg.signal.min_sentiment_confidence:
@@ -112,6 +113,13 @@ def apply_filters(
         elif cfg.signal.block_on_negative_sentiment and overall_sentiment == "negative":
             filtered = "HOLD"
             reasons.append("blocked:negative_sentiment")
+        # Contrarian: extreme bullish is cautionary for trend following (potential reversal)
+        elif contrarian_signal == "extreme_bullish_caution":
+            filtered = "HOLD"
+            reasons.append("contrarian:extreme_bullish_caution")
+        # Contrarian: extreme bearish is opportunity for trend following (momentum continuation after fear)
+        elif contrarian_signal == "extreme_bearish_opportunity":
+            reasons.append("contrarian:extreme_bearish_opportunity(enhanced)")
     elif filtered == "SHORT" and cfg.signal.sentiment_filter_enabled and sentiment_data is not None:
         if conf < cfg.signal.min_sentiment_confidence:
             filtered = "HOLD"
@@ -119,6 +127,10 @@ def apply_filters(
         elif overall_sentiment == "positive":
             filtered = "HOLD"
             reasons.append("blocked:positive_sentiment(vs_SHORT)")
+        # Contrarian: extreme bearish suggests trend may reverse up, avoid short
+        elif contrarian_signal == "extreme_bearish_opportunity":
+            filtered = "HOLD"
+            reasons.append("contrarian:extreme_bearish_avoid_short")
 
     # ── Risk filter (DB) ─────────────────────────────────────────────────
     risk_score = (risk_data or {}).get("composite_risk_score")

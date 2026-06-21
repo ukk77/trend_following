@@ -112,29 +112,25 @@ class PortfolioConstraintsConfig:
 
 # Sector classification used by portfolio constraint checks
 SECTOR_MAP: Dict[str, str] = {
-    "KMI": "Energy",
-    "WMB": "Energy",
-    "GEV": "Industrials",
-    "VST": "Utilities",
-    "MP": "Materials",
-    "UUUU": "Materials",
-    "AAPL": "Technology",  "MSFT": "Technology",  "GOOGL": "Technology",
-    "META": "Technology",  "NVDA": "Technology",  "QQQ":  "Technology",
-    "XLK":  "Technology", "SMCI": "Technology",
-    "MU": "Technology", "LITE": "Technology", "NVTS": "Technology", "ASML": "Technology",
-    "AMZN": "Consumer Discretionary",  "TSLA": "Consumer Discretionary",
-    "HD": "Consumer Discretionary", "MCD": "Consumer Discretionary", "BABA": "Consumer Discretionary",
-    "JPM":  "Financials",  "XLF": "Financials", "V": "Financials", "MA": "Financials", "BRK.B": "Financials", "MARA": "Financials",
-    "XOM":  "Energy",      "XLE": "Energy",
-    "LLY":  "Healthcare",  "UNH": "Healthcare",  "XLV": "Healthcare",
-    "ABBV": "Healthcare", "MRK": "Healthcare", "JNJ": "Healthcare",
-    "WMT":  "Consumer Staples",         "XLP": "Consumer Staples", "COST": "Consumer Staples",
-    "CAT":  "Industrials", "GE": "Industrials", "LMT": "Industrials", "RTX": "Industrials", "BA": "Industrials",
-    "FCX": "Materials", "NUE": "Materials", "XLB": "Materials",
-    "XLU":  "Utilities",
-    "XLRE": "Real Estate",
-    "SPY":  "Diversified",  "IWM": "Diversified", "SQQQ": "Inverse",
-    "GLD":  "Commodities",
+    # Utilities / Energy — trend plays
+    "VST": "Utilities", "GEV": "Industrials", "MP": "Materials", "UUUU": "Materials",
+    # Technology — strong trend stocks
+    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Technology",
+    "META": "Technology", "NVDA": "Technology",
+    # Consumer Discretionary
+    "AMZN": "Consumer Discretionary", "TSLA": "Consumer Discretionary",
+    "HD": "Consumer Discretionary", "MCD": "Consumer Discretionary",
+    # Financials
+    "V": "Financials", "MA": "Financials",
+    # Healthcare
+    "UNH": "Healthcare", "ABBV": "Healthcare", "MRK": "Healthcare", "JNJ": "Healthcare",
+    # Consumer Staples
+    "COST": "Consumer Staples",
+    # Industrials
+    "CAT": "Industrials",
+    # Diversified ETFs
+    "QQQ": "Technology", "SPY": "Diversified", "SQQQ": "Inverse",
+    # Fixed Income
     "TLT": "Fixed Income",
 }
 
@@ -224,26 +220,25 @@ class TrendFollowingConfig:
 
     # Tickers to trade (mirrors sentiment/risk pipelines)
     tickers: List[str] = field(default_factory=lambda: [
-        'VST', 'GEV', 'WMB', 'KMI', 'MP', 'UUUU',
-        # Tech / Communication
+        # Utilities / Energy / Materials — trending sectors
+        "VST", "GEV", "MP", "UUUU",
+        # Technology — strong trend stocks
         "AAPL", "MSFT", "GOOGL", "META", "NVDA",
-        "MU", "LITE", "NVTS", "ASML",
         # Consumer Discretionary
         "AMZN", "TSLA", "HD", "MCD",
         # Financials
         "V", "MA",
-        # Energy
-        "XOM",
         # Healthcare
-        "LLY", "UNH", "ABBV", "MRK", "JNJ",
+        "UNH", "ABBV", "MRK", "JNJ",
         # Consumer Staples
-        "WMT", "COST",
+        "COST",
         # Industrials
         "CAT",
-        # Diversifying ETFs / Fixed Income
-        "GLD",   # Gold — trends strongly; genuine portfolio hedge
-        "TLT",   # Long-duration treasuries
-        "SQQQ",  # Inverse NASDAQ (Stress test)
+        # Diversified ETFs
+        "QQQ", "SPY",
+        # Fixed Income / Inverse — macro trend hedges
+        "TLT",
+        "SQQQ",
     ])
 
     lookback_days: int = 7300  # 20 calendar years → ~5040 trading days
