@@ -127,7 +127,9 @@ SECTOR_MAP: Dict[str, str] = {
     # Consumer Staples
     "COST": "Consumer Staples",
     # Industrials
-    "CAT": "Industrials",
+    "CAT": "Industrials", "LIN": "Industrials",
+    # Technology (mature)
+    "IBM": "Technology",
     # Diversified ETFs
     "QQQ": "Technology", "SPY": "Diversified", "SQQQ": "Inverse",
     # Fixed Income
@@ -198,6 +200,8 @@ class TrendFollowingConfig:
             "WMT": IndicatorConfig(fast_period=50, slow_period=200),
             "LLY": IndicatorConfig(fast_period=50, slow_period=200),
             "UNH": IndicatorConfig(fast_period=50, slow_period=200),
+            "LIN": IndicatorConfig(fast_period=50, slow_period=200),
+            "IBM": IndicatorConfig(fast_period=50, slow_period=200),
         }
     )
 
@@ -233,7 +237,9 @@ class TrendFollowingConfig:
         # Consumer Staples
         "COST",
         # Industrials
-        "CAT",
+        "CAT", "LIN",
+        # Technology (mature)
+        "IBM",
         # Diversified ETFs
         "QQQ", "SPY",
         # Fixed Income / Inverse — macro trend hedges

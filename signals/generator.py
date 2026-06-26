@@ -33,7 +33,7 @@ from ..indicators.range_filter import RangeFilter, MultiTimeframeConfirmation
 from .filters import apply_filters, Action
 
 try:
-    from app.services.session_context import (
+    from trading_core.session_context import (
         fetch_premarket_gap,
         premarket_confirmation_mult,
         early_session_size_scalar,
@@ -58,6 +58,7 @@ class Signal:
     action: Action
     trend_direction: float
     filtered_strength: float
+    raw_strength: float
     reason: str
     sentiment: Optional[str] = None
     sentiment_confidence: Optional[float] = None
@@ -74,8 +75,26 @@ class Signal:
     atr_stop: Optional[float] = None
 
 
+import logging
+log = logging.getLogger(__name__)
+
 def _fetch_latest_sentiment(ticker: str) -> Optional[dict]:
-    """Look up the most recent sentiment snapshot from the API."""
+    """Look up the most recent sentiment snapshot - DB-first, API fallback."""
+    import sqlite3
+    if _SENTIMENT_DB.exists():
+        try:
+            with sqlite3.connect(str(_SENTIMENT_DB)) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT overall_sentiment, confidence, avg_sentiment "
+                    "FROM sentiment_snapshots WHERE UPPER(ticker)=UPPER(?) "
+                    "ORDER BY captured_at DESC LIMIT 1",
+                    (ticker,)
+                ).fetchone()
+                if row:
+                    return dict(row)
+        except Exception:
+            pass
     url = os.getenv("SENTIMENT_API_URL", "http://localhost:8000")
     try:
         resp = requests.get(f"{url}/api/history/{ticker}?limit=1", timeout=3)
@@ -83,13 +102,30 @@ def _fetch_latest_sentiment(ticker: str) -> Optional[dict]:
             data = resp.json()
             if data.get("snapshots") and len(data["snapshots"]) > 0:
                 return data["snapshots"][0]
-    except Exception:
-        pass
+        else:
+            log.warning("fetch_sentiment %s returned status %s", ticker, resp.status_code)
+    except Exception as e:
+        log.warning("fetch_sentiment %s failed: %s", ticker, type(e).__name__)
     return None
 
 
 def _fetch_latest_risk(ticker: str) -> Optional[dict]:
-    """Look up the most recent risk snapshot from the API."""
+    """Look up the most recent risk snapshot - DB-first, API fallback."""
+    import sqlite3
+    if _RISK_DB.exists():
+        try:
+            with sqlite3.connect(str(_RISK_DB)) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT composite_risk_score, risk_bucket, kelly_fraction_capped "
+                    "FROM risk_snapshots WHERE UPPER(ticker)=UPPER(?) "
+                    "ORDER BY captured_at DESC LIMIT 1",
+                    (ticker,)
+                ).fetchone()
+                if row:
+                    return dict(row)
+        except Exception:
+            pass
     url = os.getenv("RISK_API_URL", "http://localhost:8100")
     try:
         resp = requests.get(f"{url}/api/history/{ticker}?limit=1", timeout=3)
@@ -97,8 +133,10 @@ def _fetch_latest_risk(ticker: str) -> Optional[dict]:
             data = resp.json()
             if data.get("snapshots") and len(data["snapshots"]) > 0:
                 return data["snapshots"][0]
-    except Exception:
-        pass
+        else:
+            log.warning("fetch_risk %s returned status %s", ticker, resp.status_code)
+    except Exception as e:
+        log.warning("fetch_risk %s failed: %s", ticker, type(e).__name__)
     return None
 
 
@@ -253,6 +291,7 @@ def generate_signal(
     # ── Compute final position strength ───────────────────────────────────────
     if filtered_action == "HOLD":
         strength = 0.0
+        raw_str = 0.0
     elif filtered_action == "BUY":
         ps = cfg.position_sizing
         if overall_sentiment == "positive" and conf >= cfg.signal.min_sentiment_confidence:
@@ -287,6 +326,7 @@ def generate_signal(
                 reasons.append(f"sector=underperform(x{sector_mult})")
         
         strength = min(abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar, 1.0)
+        raw_str = abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
     elif filtered_action == "SHORT":
         ps = cfg.position_sizing
         if overall_sentiment == "negative" and conf >= cfg.signal.min_sentiment_confidence:
@@ -316,8 +356,10 @@ def generate_signal(
                 sector_mult = 0.9
                 reasons.append(f"sector=outperform_avoid(x{sector_mult})")
         
-        strength = min(abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar, 1.0)
+        raw_str = abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        strength = min(raw_str, 1.0)
     else:  # SELL / COVER
+        raw_str = abs(last_direction)
         strength = abs(last_direction)
 
     return Signal(
@@ -326,6 +368,7 @@ def generate_signal(
         action=filtered_action,
         trend_direction=last_direction,
         filtered_strength=strength,
+        raw_strength=raw_str,
         reason=" | ".join(reasons),
         sentiment=overall_sentiment,
         sentiment_confidence=conf if conf > 0 else None,

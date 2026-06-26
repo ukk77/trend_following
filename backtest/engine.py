@@ -474,11 +474,12 @@ def run_backtest(
     """
     summary = BacktestSummary()
 
-    for ticker, ohlc in ticker_ohlc.items():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _load_and_run(ticker: str, ohlc: pd.DataFrame) -> Optional[BacktestResult]:
         sentiment_hist = _load_sentiment_history(ticker)
         risk_hist = _load_risk_history(ticker)
-
-        result = _run_single_ticker(
+        return _run_single_ticker(
             ticker=ticker,
             ohlc=ohlc,
             cfg=cfg,
@@ -489,8 +490,21 @@ def run_backtest(
             start_date=start_date,
             end_date=end_date,
         )
-        if result is not None:
-            summary.results[ticker] = result
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            pool.submit(_load_and_run, ticker, ohlc): ticker
+            for ticker, ohlc in ticker_ohlc.items()
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    summary.results[ticker] = result
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Error backtesting %s: %s", ticker, e)
 
     # Combined portfolio: equal-weight average of normalised equity curves
     valid_curves = [

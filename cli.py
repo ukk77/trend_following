@@ -179,87 +179,15 @@ def cmd_backtest(args) -> None:
 
 
 def cmd_paper(args) -> None:
-    """[DEPRECATED] Use: python -m harness.cli signal_generation
-    Paper trading is now owned by the harness. This command is kept for dev/debug only.
-    """
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    from trend_following.paper_trading.tracker import run_paper_trading
-    from trend_following.config import TrendFollowingConfig
-
-    cfg = TrendFollowingConfig()
-    actions = run_paper_trading(cfg, force=getattr(args, "force", False))
-
-    if args.json:
-        print(json.dumps(actions, indent=2, default=str))
-        return
-
-    print("\n=== PAPER TRADING ACTIONS ===")
-    for a in actions:
-        tag = f"[{a['action_taken']}]" if a["action_taken"] != "HOLD" else "[ -- ]"
-        pnl_str = f"  P&L=${a['pnl']:.2f}" if a.get("pnl") is not None else ""
-        price_str = f"@ ${a['price']:.2f}" if a.get("price") else ""
-        print(
-            f"  {tag} {a['ticker']:<6}  {a['shares']:>5} shares {price_str}{pnl_str}"
-            f"  | {a['reason'][:50]}"
-        )
+    print("ERROR: Independent paper trading is disabled. Please use the unified harness: python -m harness.cli run")
+    import sys
+    sys.exit(1)
 
 
 def cmd_positions(args) -> None:
-    """[DEPRECATED] Use: python -m harness.cli positions
-    Positions are now tracked in harness_trades.db. This command shows TF-only legacy positions.
-    """
-    from app.services.market_data import fetch_ohlcv
-    from trend_following.paper_trading import db as paper_db
-    from trend_following.config import TrendFollowingConfig
-
-    cfg = TrendFollowingConfig()
-    positions = paper_db.get_positions()
-
-    if not positions:
-        print("No open paper positions.")
-        return
-
-    current_prices = {}
-    for pos in positions:
-        try:
-            ohlc = fetch_ohlcv(pos["ticker"], 5)
-            current_prices[pos["ticker"]] = float(ohlc["Close"].iloc[-1])
-        except Exception:
-            current_prices[pos["ticker"]] = pos["avg_cost"]
-
-    pv = paper_db.get_portfolio_snapshot(current_prices)
-
-    if args.json:
-        print(json.dumps(pv, indent=2))
-        return
-
-    print(
-        f"\n{'TICKER':<8} {'SHARES':>6} {'AVG_COST':>10} "
-        f"{'CUR_PRICE':>10} {'MKT_VAL':>10} {'UNREAL_PNL':>12} {'PNL%':>7}"
-    )
-    print("-" * 70)
-    for p in pv["positions"]:
-        print(
-            f"{p['ticker']:<8} {p['shares']:>6} {p['avg_cost']:>10.2f} "
-            f"{p['current_price']:>10.2f} {p['market_value']:>10.2f} "
-            f"{p['unrealised_pnl']:>+12.2f} {p['unrealised_pnl_pct']:>+6.1f}%"
-        )
-    print("-" * 70)
-    print(f"  Total market value : ${pv['total_market_value']:>12,.2f}")
-    print(f"  Total cost basis   : ${pv['total_cost_basis']:>12,.2f}")
-    print(f"  Unrealised P&L     : ${pv['total_unrealised_pnl']:>+12,.2f}  "
-          f"({pv['total_unrealised_pnl_pct']:>+.1f}%)")
-
-    # Show recent trades
-    recent = paper_db.get_trades(limit=10)
-    if recent:
-        print(f"\n  Recent trades (last {len(recent)}):")
-        for t in recent:
-            pnl_str = f"  P&L=${t['pnl']:.2f}" if t.get("pnl") is not None else ""
-            print(
-                f"    [{t['action']}] {t['ticker']} {t['shares']} @ ${t['price']:.2f}"
-                f"  {t['executed_at'][:10]}{pnl_str}"
-            )
+    print("ERROR: Independent paper trading is disabled. Please use the unified harness: python -m harness.cli positions")
+    import sys
+    sys.exit(1)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
