@@ -289,6 +289,15 @@ def generate_signal(
         reasons.append(f"early_session(x{es_scalar:.2f})")
 
     # ── Compute final position strength ───────────────────────────────────────
+    # Base trend strength: ADX-normalised so magnitude of the trend enters sizing.
+    # Scales 0.5 at the minimum ADX threshold → 1.0 at 2× that threshold.
+    # Falls back to abs(last_direction) (1.0) when ADX is disabled / unavailable.
+    if cfg.adx.enabled and adx_value is not None:
+        adx_strength = min(adx_value / (2.0 * cfg.adx.min_adx), 1.0)
+        reasons.append(f"adx_strength={adx_strength:.2f}(adx={adx_value:.1f})")
+    else:
+        adx_strength = abs(last_direction)
+
     if filtered_action == "HOLD":
         strength = 0.0
         raw_str = 0.0
@@ -325,8 +334,8 @@ def generate_signal(
                 sector_mult = 0.9
                 reasons.append(f"sector=underperform(x{sector_mult})")
         
-        strength = min(abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar, 1.0)
-        raw_str = abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        raw_str = adx_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        strength = min(raw_str, 1.0)
     elif filtered_action == "SHORT":
         ps = cfg.position_sizing
         if overall_sentiment == "negative" and conf >= cfg.signal.min_sentiment_confidence:
@@ -356,11 +365,11 @@ def generate_signal(
                 sector_mult = 0.9
                 reasons.append(f"sector=outperform_avoid(x{sector_mult})")
         
-        raw_str = abs(last_direction) * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        raw_str = adx_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
         strength = min(raw_str, 1.0)
     else:  # SELL / COVER
-        raw_str = abs(last_direction)
-        strength = abs(last_direction)
+        raw_str = adx_strength
+        strength = adx_strength
 
     return Signal(
         ticker=ticker,
