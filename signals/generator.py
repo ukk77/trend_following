@@ -43,6 +43,23 @@ except ImportError:
     def premarket_confirmation_mult(gap, direction, **kw): return 1.0  # type: ignore
     def early_session_size_scalar(**kw): return 1.0  # type: ignore
 
+try:
+    from trading_core.regime_params import get_regime_adjustments, RegimeAdjustments
+except ImportError:
+    def get_regime_adjustments(strategy, **kw):  # type: ignore
+        from dataclasses import dataclass
+        @dataclass
+        class _Neutral:
+            regime: str = "range_bound"
+            regime_detected: bool = False
+            position_size_mult: float = 1.0
+            entry_threshold_mult: float = 1.0
+            stop_width_mult: float = 1.0
+            adx_threshold_mult: float = 1.0
+            sentiment_strictness_mult: float = 1.0
+            max_risk_score_mult: float = 1.0
+        return _Neutral()
+
 _TRADING_ROOT = Path(__file__).resolve().parents[2]
 _SENTIMENT_DB = Path(os.getenv("SENTIMENT_DB_PATH",
     str(_TRADING_ROOT / "sentiment_analysis" / "backend" / "sentiment_history.db")))
@@ -162,8 +179,14 @@ def generate_signal(
     today_str = datetime.now(timezone.utc).date().isoformat()
     reasons: List[str] = []
 
-    # ── Layer 1: Primary trend direction ───────────────────────────────────
+    # ── Regime-adaptive adjustments ─────────────────────────────────────────
+    regime_adj = get_regime_adjustments("trend_following")
+    if regime_adj.regime_detected:
+        reasons.append(f"regime={regime_adj.regime}")
+
+    # ── Layer 1: Primary trend direction (continuous strength) ──────────────
     ind_cfg = cfg.get_indicator_cfg(ticker)
+    trend_intensity = 0.0  # continuous measure of trend strength: >0 bullish, <0 bearish
     if cfg.macd.use_macd_entry:
         ema_gate = EMAIndicator(cfg.macd.trend_gate_period).compute(ohlc).values
         macd_ind = MACD(fast=cfg.macd.fast, slow=cfg.macd.slow, signal=cfg.macd.signal)
@@ -173,18 +196,26 @@ def generate_signal(
         latest_macd = float(macd_hist_vals.dropna().iloc[-1]) if not macd_hist_vals.dropna().empty else 0.0
         above_gate = latest_close > latest_ema
         last_direction = 1.0 if (above_gate and latest_macd > 0) else -1.0
+        # Continuous intensity: normalized MACD histogram relative to price
+        price_for_norm = latest_close if latest_close > 0 else 1.0
+        trend_intensity = latest_macd / price_for_norm * 100  # expressed as bps-like scale
         signal_name = f"MACD({cfg.macd.fast},{cfg.macd.slow},{cfg.macd.signal})+EMA{cfg.macd.trend_gate_period}gate"
-        reasons.append(f"trend={signal_name} dir={last_direction:+.0f}")
+        reasons.append(f"trend={signal_name} dir={last_direction:+.0f} intensity={trend_intensity:+.3f}")
     else:
         crossover = CrossoverSignal(
             fast_window=ind_cfg.fast_period,
             slow_window=ind_cfg.slow_period,
             ma_type=ind_cfg.ma_type,
         )
-        direction_series = crossover.signal_series(ohlc)
+        result = crossover.compute(ohlc)
+        direction_series = result.values
         clean = direction_series.dropna()
         last_direction = float(clean.iloc[-1]) if not clean.empty else 0.0
-        reasons.append(f"trend={crossover.name} dir={last_direction:+.0f}")
+        # Use gap_pct as continuous trend intensity
+        if result.raw is not None and "gap_pct" in result.raw.columns:
+            gap_series = result.raw["gap_pct"].dropna()
+            trend_intensity = float(gap_series.iloc[-1]) if not gap_series.empty else 0.0
+        reasons.append(f"trend={crossover.name} dir={last_direction:+.0f} gap={trend_intensity:+.4f}")
 
     if last_direction > 0:
         filtered_action: Action = "BUY"
@@ -194,9 +225,10 @@ def generate_signal(
         filtered_action = "HOLD"
 
     # ── Compute indicator snapshot values ────────────────────────────────────
+    effective_adx_min = cfg.adx.min_adx * regime_adj.adx_threshold_mult
     adx_value: Optional[float] = None
     if cfg.adx.enabled:
-        adx_ind = ADX(period=cfg.adx.period, threshold=cfg.adx.min_adx)
+        adx_ind = ADX(period=cfg.adx.period, threshold=effective_adx_min)
         adx_value = adx_ind.latest_value(ohlc)
 
     rsi_value: Optional[float] = None
@@ -289,14 +321,20 @@ def generate_signal(
         reasons.append(f"early_session(x{es_scalar:.2f})")
 
     # ── Compute final position strength ───────────────────────────────────────
-    # Base trend strength: ADX-normalised so magnitude of the trend enters sizing.
-    # Scales 0.5 at the minimum ADX threshold → 1.0 at 2× that threshold.
-    # Falls back to abs(last_direction) (1.0) when ADX is disabled / unavailable.
+    # Combined trend strength from ADX magnitude + MA gap (continuous signal).
+    # ADX component: 0.5 at the minimum threshold → 1.0 at 2× threshold.
+    # Intensity component: normalised MA gap (0.5% gap → 0.5, 2% gap → 1.0).
     if cfg.adx.enabled and adx_value is not None:
-        adx_strength = min(adx_value / (2.0 * cfg.adx.min_adx), 1.0)
+        adx_strength = min(adx_value / (2.0 * effective_adx_min), 1.0)
         reasons.append(f"adx_strength={adx_strength:.2f}(adx={adx_value:.1f})")
     else:
         adx_strength = abs(last_direction)
+
+    # Continuous intensity from MA gap or MACD normalised histogram
+    intensity_component = min(abs(trend_intensity) / 0.02, 1.0)  # 2% gap = full strength
+    # Blend: 60% ADX + 40% intensity (ADX still dominates but gap adds nuance)
+    combined_trend_strength = 0.6 * adx_strength + 0.4 * intensity_component
+    reasons.append(f"trend_strength={combined_trend_strength:.2f}(adx={adx_strength:.2f},gap={intensity_component:.2f})")
 
     if filtered_action == "HOLD":
         strength = 0.0
@@ -334,7 +372,7 @@ def generate_signal(
                 sector_mult = 0.9
                 reasons.append(f"sector=underperform(x{sector_mult})")
         
-        raw_str = adx_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        raw_str = combined_trend_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar * regime_adj.position_size_mult
         strength = min(raw_str, 1.0)
     elif filtered_action == "SHORT":
         ps = cfg.position_sizing
@@ -365,11 +403,11 @@ def generate_signal(
                 sector_mult = 0.9
                 reasons.append(f"sector=outperform_avoid(x{sector_mult})")
         
-        raw_str = adx_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar
+        raw_str = combined_trend_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar * regime_adj.position_size_mult
         strength = min(raw_str, 1.0)
     else:  # SELL / COVER
-        raw_str = adx_strength
-        strength = adx_strength
+        raw_str = combined_trend_strength
+        strength = combined_trend_strength
 
     return Signal(
         ticker=ticker,
