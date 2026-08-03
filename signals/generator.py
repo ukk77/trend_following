@@ -31,6 +31,7 @@ from ..indicators.volatility import ATR, VolatilityRegime
 from ..indicators.volume import VolumeConfirmation
 from ..indicators.range_filter import RangeFilter, MultiTimeframeConfirmation
 from .filters import apply_filters, Action
+from trading_core.signal_strength import saturate
 
 try:
     from trading_core.session_context import (
@@ -373,7 +374,7 @@ def generate_signal(
                 reasons.append(f"sector=underperform(x{sector_mult})")
         
         raw_str = combined_trend_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar * regime_adj.position_size_mult
-        strength = min(raw_str, 1.0)
+        strength = saturate(raw_str)
     elif filtered_action == "SHORT":
         ps = cfg.position_sizing
         if overall_sentiment == "negative" and conf >= cfg.signal.min_sentiment_confidence:
@@ -404,7 +405,7 @@ def generate_signal(
                 reasons.append(f"sector=outperform_avoid(x{sector_mult})")
         
         raw_str = combined_trend_strength * sent_mult * contrarian_mult * sector_mult * (vol_regime_mult or 1.0) * pm_mult * es_scalar * regime_adj.position_size_mult
-        strength = min(raw_str, 1.0)
+        strength = saturate(raw_str)
     else:  # SELL / COVER
         raw_str = combined_trend_strength
         strength = combined_trend_strength
